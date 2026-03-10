@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sequential Timer</title>
+    <style>
+        :root { --bg: #000; --txt: #fff; --acc: #00ff00; --nxt: #ffaa00; --alt: #ff4444; }
+        body { background: var(--bg); color: var(--txt); font-family: 'Segoe UI', sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        
+        /* 段ごとの高さ設定 */
+        .row { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; border-bottom: 1px solid #222; position: relative; width: 100%; }
+        .row-large { flex: 1.6; background: #080808; } /* 経過と残り時間を大きく */
+
+        /* ラベル設定 */
+        .label { font-size: 1.6rem; color: #aaa; letter-spacing: 2px; font-weight: 600; margin-bottom: 2px; }
+        
+        /* 2段目・4段目（時刻情報）用 */
+        .time-sub { font-size: clamp(2rem, 10vw, 3.2rem); font-weight: bold; font-variant-numeric: tabular-nums; line-height: 1; }
+        
+        /* 3段目・5段目（動く数値）用 */
+        .time-main { font-size: clamp(4rem, 20vw, 7.5rem); font-weight: bold; font-variant-numeric: tabular-nums; line-height: 0.9; }
+
+        /* 設定画面 */
+        #settings-screen { display: none; padding: 20px; background: #1a1a1a; position: absolute; inset: 0; z-index: 100; box-sizing: border-box; }
+        textarea { width: 100%; height: 60vh; background: #000; color: var(--acc); font-size: 1.8rem; padding: 15px; box-sizing: border-box; font-family: monospace; border: 1px solid #444; }
+        .btn-row { display: flex; gap: 10px; margin-top: 20px; }
+        button { flex: 1; padding: 15px; font-size: 1.2rem; border: none; border-radius: 8px; cursor: pointer; }
+        #open-settings { position: absolute; top: 10px; right: 10px; background: #333; color: #fff; z-index: 10; width: auto; padding: 8px 15px; font-size: 0.9rem; }
+        #stage-info { position: absolute; top: 15px; left: 15px; color: #555; font-size: 1.2rem; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <button id="open-settings">SETTINGS</button>
+    <div id="stage-info">STAGE: -- / --</div>
+
+    <div class="row">
+        <div class="label">PRESENT TIME</div>
+        <div id="current-time" class="time-sub" style="color:#eee">00:00:00</div>
+    </div>
+
+    <div class="row">
+        <div class="label">CURRENT START</div>
+        <div id="start-time" class="time-sub" style="color:var(--acc)">--:--:--</div>
+    </div>
+
+    <div class="row row-large">
+        <div class="label">ELAPSED</div>
+        <div id="elapsed-time" class="time-main" style="color:var(--acc)">00:00:00</div>
+    </div>
+
+    <div class="row">
+        <div class="label">NEXT START</div>
+        <div id="next-start-at" class="time-sub" style="color:var(--nxt)">--:--:--</div>
+    </div>
+
+    <div class="row row-large">
+        <div class="label">COUNTDOWN</div>
+        <div id="remaining-time" class="time-main" style="color:var(--nxt)">00:00:00</div>
+    </div>
+
+    <div id="settings-screen">
+        <h3>START TIMES (HHMMSS)</h3>
+        <textarea id="schedule-input" placeholder="090000&#10;103000"></textarea>
+        <div class="btn-row">
+            <button onclick="toggleSettings()" style="background:#444; color:#fff;">CANCEL</button>
+            <button onclick="saveSchedule()" style="background:var(--acc); color:#000; font-weight:bold;">SAVE & APPLY</button>
+        </div>
+    </div>
+
+    <script>
+        let schedule = [];
+
+        function parseSchedule(text) {
+            const now = new Date();
+            schedule = text.split('\n')
+                .map(line => line.trim().replace(/[^0-9]/g, ''))
+                .filter(numStr => numStr.length === 6)
+                .map(numStr => {
+                    const h = parseInt(numStr.substring(0, 2)), m = parseInt(numStr.substring(2, 4)), s = parseInt(numStr.substring(4, 6));
+                    if (h >= 24 || m >= 60 || s >= 60) return null;
+                    let d = new Date(); d.setHours(h, m, s, 0);
+                    const diff = now.getTime() - d.getTime();
+                    if (diff > 12 * 60 * 60 * 1000) d.setDate(d.getDate() + 1);
+                    else if (diff < -12 * 60 * 60 * 1000) d.setDate(d.getDate() - 1);
+                    return d;
+                })
+                .filter(d => d !== null).sort((a, b) => a - b).slice(0, 30);
+        }
+
+        function saveSchedule() {
+            localStorage.setItem('sequential_timer', document.getElementById('schedule-input').value);
+            parseSchedule(document.getElementById('schedule-input').value);
+            toggleSettings();
+        }
+
+        function toggleSettings() {
+            const s = document.getElementById('settings-screen');
+            s.style.display = (s.style.display === 'block') ? 'none' : 'block';
+        }
+
+        function update() {
+            const now = new Date();
+            document.getElementById('current-time').innerText = formatClock(now);
+            const past = schedule.filter(s => s <= now);
+            const future = schedule.filter(s => s > now);
+            document.getElementById('stage-info').innerText = `STAGE: ${past.length} / ${schedule.length}`;
+
+            // 現在のステージ
+            if (past.length > 0) {
+                const cur = past[past.length - 1];
+                document.getElementById('start-time').innerText = formatClock(cur);
+                document.getElementById('elapsed-time').innerText = formatDiff(Math.floor((now - cur) / 1000));
+            }
+
+            // 次のステージ
+            if (future.length > 0) {
+                const nxt = future[0];
+                const diffMs = nxt.getTime() - now.getTime();
+                const diffSecCeil = Math.ceil(diffMs / 1000); 
+                
+                document.getElementById('next-start-at').innerText = formatClock(nxt);
+                document.getElementById('remaining-time').innerText = formatDiff(diffSecCeil);
+
+                // 4段目と5段目の色を連動（1分前から赤に変更）
+                const targetColor = (diffSecCeil <= 60) ? "var(--alt)" : "var(--nxt)";
+                document.getElementById('next-start-at').style.color = targetColor;
+                document.getElementById('remaining-time').style.color = targetColor;
+            } else {
+                document.getElementById('next-start-at').innerText = "--:--:--";
+                document.getElementById('remaining-time').innerText = "FINISH";
+                document.getElementById('next-start-at').style.color = "#444";
+                document.getElementById('remaining-time').style.color = "#444";
+            }
+            requestAnimationFrame(update);
+        }
+
+        function formatClock(date) { return date.toTimeString().split(' ')[0]; }
+        function formatDiff(sec) {
+            if (sec < 0) sec = 0;
+            const h = Math.floor(sec / 3600).toString().padStart(2, '0');
+            const m = Math.floor((sec % 3600) / 60).toString().padStart(2, '0');
+            const s = (sec % 60).toString().padStart(2, '0');
+            return `${h}:${m}:${s}`;
+        }
+
+        document.getElementById('open-settings').onclick = toggleSettings;
+        const saved = localStorage.getItem('sequential_timer');
+        if (saved) { document.getElementById('schedule-input').value = saved; parseSchedule(saved); }
+        update();
+    </script>
+</body>
+</html>
